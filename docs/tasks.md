@@ -38,6 +38,7 @@
 ## Допущения
 
 - **Q25b (числа не названы):** таймауты/ретраи — LLM 30 с / 3 попытки, STT 60 с / 2, Google 10 с / 1, SQLite 5 с / 1, backoff 1 → 3 с. Все значения — поля `AgentConfig`; смена чисел не требует правки кода.
+- **Дефолты `AgentConfig`, не зафиксированные таблицей решений (T-002):** `llm.base_url="https://api.deepseek.com/v1"`, `llm.model=llm.vision_model="deepseek-flash"`, `llm.api="responses"`, `llm.api_key=""`; `stt.base_url="https://api.openai.com/v1"`, `stt.model="whisper-1"`, `stt.language="ru"`; `sqlite_path="nutrition.db"`; `sink_order=("sqlite", "google_health")` — Sink-и не из списка не вызываются; `meal_duration=30 мин` (интервал Google-точки); `commit_ttl=15 мин`; `debug=False`. Модель конфига `frozen` и `extra="forbid"`: опечатка в имени поля — `ValidationError`.
 - Логирование — stdlib `logging`, без внешних зависимостей.
 - `raw_response` отдаётся только при `parse_failed` или `debug=True`; в SQLite `raw_json` пишется всегда (аудит).
 
