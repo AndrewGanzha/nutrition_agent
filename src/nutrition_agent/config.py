@@ -47,7 +47,7 @@ class STTConfig(BaseModel):
     base_url: NonEmptyStr = "https://api.openai.com/v1"
     api_key: str = ""
     model: NonEmptyStr = "whisper-1"
-    language: NonEmptyStr = "ru"
+    language: NonEmptyStr | None = None
 
 
 class RetryPolicy(BaseModel):

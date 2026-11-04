@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from nutrition_agent.config import AgentConfig, RetryConfig, TimeoutConfig
+from nutrition_agent.config import AgentConfig, RetryConfig, STTConfig, TimeoutConfig
 
 
 def test_defaults_follow_fixed_decisions() -> None:
@@ -21,6 +21,8 @@ def test_defaults_follow_fixed_decisions() -> None:
 
     assert config.stt.base_url == "https://api.openai.com/v1"
     assert config.stt.model == "whisper-1"
+    assert config.stt.language is None
+    assert STTConfig(language="ru").language == "ru"
 
     assert config.timeouts == TimeoutConfig(llm=30.0, stt=60.0, google=10.0, sqlite=5.0)
 
