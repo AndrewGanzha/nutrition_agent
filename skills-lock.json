@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "code-review": {
+      "source": "AndrewGanzha/basic-skills",
+      "sourceType": "github",
+      "skillPath": "skills/code-review/SKILL.md",
+      "computedHash": "bc366afefb3f93318da132f80be078a9f1695f5d72cf66117b0c5d2e81a26e22"
+    },
+    "codebase-design": {
+      "source": "AndrewGanzha/basic-skills",
+      "sourceType": "github",
+      "skillPath": "skills/codebase-design/SKILL.md",
+      "computedHash": "08410ff20a8d889c0d12f354df0f2631ad4bbfea9931b4293bb1d9ed4e520d61"
+    },
+    "domain-modeling": {
+      "source": "AndrewGanzha/basic-skills",
+      "sourceType": "github",
+      "skillPath": "skills/domain-modeling/SKILL.md",
+      "computedHash": "cf02d6efcbfbbae2439b52ed2a1259f7b4fae0822b3bc46d5cb9775569e9f685"
+    },
+    "grilling": {
+      "source": "AndrewGanzha/basic-skills",
+      "sourceType": "github",
+      "skillPath": "skills/grilling/SKILL.md",
+      "computedHash": "62655042101be4130a646deadd10912f76badf72a05f68259f9d5fefe2bdfd1a"
+    },
+    "tdd": {
+      "source": "AndrewGanzha/basic-skills",
+      "sourceType": "github",
+      "skillPath": "skills/tdd/SKILL.md",
+      "computedHash": "1fabacec8ad68e6a8f91b04d8cecb378ed5d63c7513e3d266e2ae20520d694ff"
+    }
+  }
+}
