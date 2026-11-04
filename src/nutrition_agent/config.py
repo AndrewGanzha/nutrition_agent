@@ -55,6 +55,10 @@ class RetryPolicy(BaseModel):
 
     model_config = _STRICT
 
+    # Deliberately no default. Pydantic does not merge a nested payload with the
+    # component-level default, so any default here would turn a partial override
+    # such as {"llm": {"backoff_max": 10}} into a silent downgrade of the LLM
+    # budget (3 -> default). Requiring it keeps the override loud.
     max_attempts: int = Field(ge=1)
     backoff_base: PositiveSeconds = 1.0
     backoff_max: PositiveSeconds = 3.0

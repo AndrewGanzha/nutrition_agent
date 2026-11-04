@@ -33,6 +33,7 @@ def test_defaults_follow_fixed_decisions() -> None:
     assert config.sink_order == ("sqlite", "google_health")
     assert config.sqlite_path == Path("nutrition.db")
     assert config.commit_ttl == timedelta(minutes=15)
+    assert config.meal_duration == timedelta(minutes=30)
     assert config.debug is False
 
 
@@ -70,6 +71,13 @@ def test_retry_attempts_must_be_positive() -> None:
 def test_backoff_ceiling_below_base_rejected() -> None:
     with pytest.raises(ValidationError):
         AgentConfig.model_validate({"retry": {"llm": {"backoff_base": 5, "backoff_max": 2}}})
+
+
+def test_partial_retry_override_must_state_max_attempts() -> None:
+    # Component defaults are not merged into nested payloads, so accepting a
+    # partial override would silently reset 3 LLM attempts to some field default.
+    with pytest.raises(ValidationError):
+        AgentConfig.model_validate({"retry": {"llm": {"backoff_max": 10}}})
 
 
 @pytest.mark.parametrize("field", ["meal_duration", "commit_ttl"])
