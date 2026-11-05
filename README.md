@@ -139,6 +139,22 @@ if preview.entry is not None:
 | `invalid_input` | пустой/несовместимый вход, лимит или неизвестный формат |
 | `error` | LLM/сеть упали или ни один Sink не записал entry |
 
+## Документация
+
+Документация собрана на MkDocs + mkdocstrings; API-справочник генерируется из
+docstring-ов, поэтому страница `api.md` не дублирует сигнатуры.
+
+```bash
+uv run mkdocs serve      # предпросмотр на http://127.0.0.1:8000
+uv run mkdocs build      # статическая сборка в site/
+```
+
+- [Обзор и схема пайплайна](docs/index.md)
+- [API](docs/api.md)
+- [Use cases](docs/use_cases.md)
+- [Google Health](docs/google_health.md)
+- [План задач и решения](docs/tasks.md)
+
 ## Разработка
 
 ```bash

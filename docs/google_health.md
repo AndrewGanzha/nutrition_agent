@@ -49,7 +49,7 @@ class TokenProvider(Protocol):
 items в `failed`, остальные Sink-и продолжают работу.
 
 Минимальная реализация «refresh token → access token» —
-[`examples/google_token_provider.py`](../examples/google_token_provider.py):
+[`examples/google_token_provider.py`](https://github.com/AndrewGanzha/nutrition_agent/blob/main/examples/google_token_provider.py):
 
 ```python
 from examples.google_token_provider import build_google_sink
