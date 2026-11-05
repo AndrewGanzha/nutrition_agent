@@ -33,10 +33,13 @@ from nutrition_agent.routing import (
 )
 from nutrition_agent.sinks import (
     FakeSink,
+    GoogleHealthSink,
     ItemStatus,
     ItemWrite,
+    LocalSQLiteSink,
     Sink,
     SinkResult,
+    TokenProvider,
 )
 from nutrition_agent.speech import Transcriber
 
@@ -48,6 +51,7 @@ __all__ = [
     "ExtractionStatus",
     "FakeSink",
     "FoodItem",
+    "GoogleHealthSink",
     "ImagePart",
     "InputStatus",
     "ItemStatus",
@@ -55,6 +59,7 @@ __all__ = [
     "LLMClient",
     "LLMConfig",
     "LLMError",
+    "LocalSQLiteSink",
     "MealType",
     "Message",
     "NutritionAgent",
@@ -70,6 +75,7 @@ __all__ = [
     "SinkResult",
     "TextPart",
     "TimeoutConfig",
+    "TokenProvider",
     "Transcriber",
     "detect_image_mime",
     "extract_meal",
