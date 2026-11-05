@@ -9,7 +9,7 @@ import pytest
 
 from nutrition_agent.agent import NutritionAgent
 from nutrition_agent.config import AgentConfig
-from nutrition_agent.domain import NutritionEntry
+from nutrition_agent.domain import FoodItem, NutritionEntry
 from nutrition_agent.llm import LLMError, Messages
 from nutrition_agent.sinks import FakeSink, Sink
 
@@ -276,3 +276,76 @@ async def test_entry_written_once_per_sink() -> None:
     assert len(sqlite.calls) == 1
     entry = sqlite.calls[0].entry
     assert isinstance(entry, NutritionEntry)
+
+
+def _entry() -> NutritionEntry:
+    return NutritionEntry(
+        eaten_at=EATEN_AT,
+        source="text",
+        items=[FoodItem(name="котлета", grams=150), FoodItem(name="гречка", grams=200)],
+    )
+
+
+async def test_write_never_calls_llm() -> None:
+    llm = StubLLM([])
+    sqlite = FakeSink("sqlite")
+
+    result = await _agent(llm, sinks=[sqlite]).write(_entry())
+
+    assert result.status == "ok"
+    assert llm.calls == []
+    assert result.raw_response is None
+    assert result.transcript is None
+
+
+async def test_write_dispatches_entry_in_sink_order_with_user_id() -> None:
+    sqlite, google = FakeSink("sqlite"), FakeSink("google_health")
+    entry = _entry()
+
+    result = await _agent(sinks=[google, sqlite]).write(entry, user_id="u-1")
+
+    assert result.entry is entry
+    assert [sink_result.name for sink_result in result.sink_results] == ["sqlite", "google_health"]
+    assert [call.entry for call in sqlite.calls] == [entry]
+    assert [call.user_id for call in google.calls] == ["u-1"]
+
+
+async def test_repeated_write_treats_sink_skips_as_success() -> None:
+    sqlite = FakeSink("sqlite", default_status="skipped")
+
+    result = await _agent(sinks=[sqlite]).write(_entry())
+
+    assert result.status == "ok"
+    assert [item.status for item in result.sink_results[0].items] == ["skipped", "skipped"]
+    assert result.sinks_succeeded == ["sqlite"]
+
+
+async def test_write_aggregates_item_level_results() -> None:
+    sqlite = FakeSink("sqlite", statuses={1: "skipped"})
+    google = FakeSink("google_health", statuses={1: "failed"})
+
+    result = await _agent(sinks=[sqlite, google]).write(_entry())
+
+    assert result.status == "partial"
+    assert result.sinks_succeeded == ["sqlite"]
+    assert result.sinks_failed == ["google_health"]
+
+
+async def test_write_all_items_failed_is_error() -> None:
+    sqlite = FakeSink("sqlite", default_status="failed")
+
+    result = await _agent(sinks=[sqlite]).write(_entry())
+
+    assert result.status == "error"
+    assert result.error == "no sink wrote the entry"
+
+
+async def test_write_dry_run_skips_sinks_and_returns_token() -> None:
+    sqlite = FakeSink("sqlite")
+
+    result = await _agent(sinks=[sqlite]).write(_entry(), dry_run=True)
+
+    assert result.status == "ok"
+    assert result.commit_token
+    assert result.sink_results == []
+    assert sqlite.calls == []

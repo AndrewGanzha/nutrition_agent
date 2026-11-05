@@ -105,7 +105,38 @@ class NutritionAgent:
                 error=extraction.error,
             )
 
-        entry = extraction.entry
+        return await self._deliver(
+            extraction.entry,
+            user_id,
+            dry_run=dry_run,
+            transcript=transcript,
+            raw_response=raw_response,
+        )
+
+    async def write(
+        self,
+        entry: NutritionEntry,
+        *,
+        user_id: str | None = None,
+        dry_run: bool = False,
+    ) -> ProcessResult:
+        """Write an already parsed entry, bypassing routing, STT and the LLM.
+
+        Idempotency lives in the sinks: they report ``skipped`` for items they
+        already hold (``sink_writes``), so a repeated or resumed write only
+        reaches the missing items. The agent never filters items itself.
+        """
+        return await self._deliver(entry, user_id, dry_run=dry_run)
+
+    async def _deliver(
+        self,
+        entry: NutritionEntry,
+        user_id: str | None,
+        *,
+        dry_run: bool,
+        transcript: str | None = None,
+        raw_response: str | None = None,
+    ) -> ProcessResult:
         if dry_run:
             return ProcessResult(
                 status="ok",
