@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -466,3 +467,95 @@ async def test_unknown_token_is_error() -> None:
 
     assert result.status == "error"
     assert result.error == "unknown or already committed token"
+
+
+def _extra(record: logging.LogRecord) -> dict[str, object]:
+    return record.__dict__
+
+
+async def test_partial_write_logs_one_warning_per_failed_item(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    google = FakeSink("google_health", statuses={1: "failed"})
+    agent = _agent(sinks=[FakeSink("sqlite"), google])
+    entry = _entry()
+
+    with caplog.at_level(logging.WARNING, logger="nutrition_agent.agent"):
+        result = await agent.write(entry, user_id="u-1")
+
+    assert result.status == "partial"
+    warnings = [record for record in caplog.records if record.getMessage() == "sink item failed"]
+    assert len(warnings) == 1
+    extra = _extra(warnings[0])
+    assert extra["entry_id"] == str(entry.id)
+    assert extra["sink"] == "google_health"
+    assert extra["user_id"] == "u-1"
+    assert extra["item_idx"] == 1
+    assert isinstance(extra["duration_ms"], float)
+
+
+async def test_sink_completion_is_logged_with_duration(caplog: pytest.LogCaptureFixture) -> None:
+    entry = _entry()
+
+    with caplog.at_level(logging.INFO, logger="nutrition_agent.agent"):
+        await _agent(sinks=[FakeSink("sqlite")]).write(entry, user_id="u-1")
+
+    finished = [
+        record for record in caplog.records if record.getMessage() == "sink write finished"
+    ]
+    assert len(finished) == 1
+    extra = _extra(finished[0])
+    assert extra["entry_id"] == str(entry.id)
+    assert extra["user_id"] == "u-1"
+    assert isinstance(extra["duration_ms"], float)
+
+
+async def test_raw_response_is_never_logged(caplog: pytest.LogCaptureFixture) -> None:
+    raw = '{"is_meal": true, "items": [], "raw_marker": "RAW-MARKER"}'
+    llm = StubLLM([raw, raw])
+
+    with caplog.at_level(logging.DEBUG):
+        result = await _agent(llm, sinks=[], debug=True).process(text="борщ")
+
+    assert result.status == "parse_failed"
+    assert result.raw_response == raw
+    assert "RAW-MARKER" not in caplog.text
+
+
+class GatedSink:
+    """First write parks on a gate so two commits can overlap."""
+
+    name = "sqlite"
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls = 0
+
+    async def write(self, entry: NutritionEntry, *, user_id: str | None = None) -> SinkResult:
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
+        return SinkResult(
+            name=self.name,
+            items=[ItemWrite(index=index, status="written") for index in range(len(entry.items))],
+        )
+
+
+async def test_concurrent_commit_dispatches_once() -> None:
+    sink = GatedSink()
+    agent = _agent(sinks=[sink])
+
+    preview = await agent.process(text="борщ", dry_run=True)
+    token = preview.commit_token
+    assert token is not None
+
+    first = asyncio.create_task(agent.commit(token))
+    await sink.started.wait()
+    second = await agent.commit(token)
+    assert second.status == "error"
+    assert second.error == "unknown or already committed token"
+
+    sink.release.set()
+    assert (await first).status == "ok"
+    assert sink.calls == 1

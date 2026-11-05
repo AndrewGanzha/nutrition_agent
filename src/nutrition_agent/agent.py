@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -14,6 +16,8 @@ from nutrition_agent.results import ProcessResult, ProcessStatus
 from nutrition_agent.routing import MAX_AUDIO_BYTES, prepare_input
 from nutrition_agent.sinks import ItemWrite, Sink, SinkResult
 from nutrition_agent.speech import Transcriber
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -141,11 +145,19 @@ class NutritionAgent:
         if pending.expires_at <= datetime.now(UTC):
             del self._pending[token]
             return ProcessResult(status="error", error="commit token expired")
+        # Consume before awaiting so overlapping commits cannot dispatch twice.
+        del self._pending[token]
+        self._purge_expired()
 
         result = await self._deliver(pending.entry, pending.user_id, dry_run=False)
-        if result.status == "ok":
-            del self._pending[token]
+        if result.status != "ok":
+            self._pending[token] = pending
         return result
+
+    def _purge_expired(self) -> None:
+        now = datetime.now(UTC)
+        for token in [name for name, pending in self._pending.items() if pending.expires_at <= now]:
+            del self._pending[token]
 
     async def _deliver(
         self,
@@ -179,21 +191,45 @@ class NutritionAgent:
     async def _dispatch(self, entry: NutritionEntry, user_id: str | None) -> list[SinkResult]:
         results: list[SinkResult] = []
         for sink in self._sinks:
+            started = time.perf_counter()
             try:
-                results.append(await sink.write(entry, user_id=user_id))
+                result = await sink.write(entry, user_id=user_id)
             except Exception as exc:  # a broken sink must not stop the chain
-                results.append(
-                    SinkResult(
-                        name=sink.name,
-                        items=[
-                            ItemWrite(index=index, status="failed", error=str(exc))
-                            for index in range(len(entry.items))
-                        ],
-                    )
+                result = SinkResult(
+                    name=sink.name,
+                    items=[
+                        ItemWrite(index=index, status="failed", error=str(exc))
+                        for index in range(len(entry.items))
+                    ],
                 )
+            duration_ms = round((time.perf_counter() - started) * 1000, 1)
+            logger.info(
+                "sink write finished",
+                extra={
+                    "entry_id": str(entry.id),
+                    "sink": sink.name,
+                    "user_id": user_id,
+                    "duration_ms": duration_ms,
+                },
+            )
+            for item in result.items:
+                if item.status == "failed":
+                    logger.warning(
+                        "sink item failed",
+                        extra={
+                            "entry_id": str(entry.id),
+                            "sink": sink.name,
+                            "user_id": user_id,
+                            "item_idx": item.index,
+                            "duration_ms": duration_ms,
+                            "error": item.error,
+                        },
+                    )
+            results.append(result)
         return results
 
     def _issue_token(self, entry: NutritionEntry, user_id: str | None) -> str:
+        self._purge_expired()
         token = str(uuid4())
         self._pending[token] = _PendingCommit(
             entry=entry,
