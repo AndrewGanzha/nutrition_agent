@@ -2,14 +2,17 @@
 
 The package itself never stores OAuth secrets or refresh tokens: the caller
 owns them (env, secret manager) and injects a provider implementing
-``TokenProvider``. This example is the smallest thing that works against the
-real endpoint; cache tokens yourself if you call it often.
+``TokenProvider``. Access tokens are cached per user until shortly before
+``expires_in``, so a busy process does not spend the OAuth token-grant quota
+(10 000 grants per 24 h) on every write. The cache is per process: each worker
+refreshes independently, which is fine because refresh tokens are user-scoped.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 
 import httpx
 
@@ -28,13 +31,21 @@ class RefreshTokenProvider:
         client_secret: str,
         refresh_tokens: Mapping[str | None, str],
         transport: httpx.AsyncBaseTransport | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
         self._refresh_tokens = refresh_tokens
         self._transport = transport
+        self._clock = clock
+        self._cached: dict[str | None, tuple[str, float]] = {}
 
     async def __call__(self, user_id: str | None) -> str:
+        now = self._clock()
+        cached = self._cached.get(user_id)
+        if cached is not None and cached[1] > now:
+            return cached[0]
+
         refresh_token = self._refresh_tokens.get(user_id)
         if refresh_token is None:
             raise LookupError(f"no refresh token for user {user_id!r}")
@@ -49,7 +60,12 @@ class RefreshTokenProvider:
                 },
             )
             response.raise_for_status()
-            return str(response.json()["access_token"])
+            body = response.json()
+        token = str(body["access_token"])
+        lifetime = float(body.get("expires_in", 3600))
+        # Refresh a minute early instead of racing the expiry.
+        self._cached[user_id] = (token, now + max(lifetime - 60.0, 0.0))
+        return token
 
 
 def build_google_sink(refresh_tokens: Mapping[str | None, str]) -> GoogleHealthSink:
