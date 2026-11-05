@@ -100,7 +100,7 @@ if preview.entry is not None:
 | --- | --- |
 | `llm.base_url` / `llm.api_key` | `https://api.deepseek.com/v1` / `""` |
 | `llm.model` / `llm.vision_model` | `deepseek-flash` / `deepseek-flash` |
-| `llm.api` | `responses` (фолбэк-режим `chat`) |
+| `llm.api` | `responses` (Chat Completions включается вручную: `api="chat"`, автопереключения нет) |
 | `stt.*` | OpenAI-совместимый `whisper-1`, `language=None` |
 | `sqlite_path` | `nutrition.db` |
 | `sink_order` | `("sqlite", "google_health")` — Sink-и не из списка не вызываются |
