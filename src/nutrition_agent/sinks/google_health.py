@@ -121,10 +121,19 @@ class GoogleHealthSink:
                     ItemWrite(index=index, status="failed", error=_http_error(response))
                 )
                 continue
-            external_id = _external_id(response)
+            body = _json_body(response)
+            operation_error = _operation_error(body)
+            if operation_error is not None:
+                await record_item_write(db, entry_id, self.name, index, status="failed")
+                items.append(ItemWrite(index=index, status="failed", error=operation_error))
+                continue
+            external_id = _operation_name(body)
             await record_item_write(
                 db, entry_id, self.name, index, status="written", external_id=external_id
             )
+            # Commit per landed item: if the loop aborts later, successes stay
+            # recorded and a retry cannot duplicate the data points.
+            await db.commit()
             items.append(ItemWrite(index=index, status="written", external_id=external_id))
         return items
 
@@ -171,13 +180,28 @@ def _utc_offset(value: datetime) -> str:
     return f"{int(offset.total_seconds())}s"
 
 
-def _external_id(response: httpx.Response) -> str | None:
-    """Best-effort data point name from the long-running operation body."""
+def _json_body(response: httpx.Response) -> dict[str, Any] | None:
     try:
         body = response.json()
     except json.JSONDecodeError:
         return None
-    if not isinstance(body, dict):
+    return body if isinstance(body, dict) else None
+
+
+def _operation_error(body: dict[str, Any] | None) -> str | None:
+    """A completed-but-failed Operation still comes back with HTTP 2xx."""
+    if body is None or body.get("error") is None:
+        return None
+    error = body["error"]
+    message = error.get("message") if isinstance(error, dict) else None
+    return f"operation failed: {message}" if isinstance(message, str) and message else (
+        "operation failed"
+    )
+
+
+def _operation_name(body: dict[str, Any] | None) -> str | None:
+    """Best-effort data point name from the long-running operation body."""
+    if body is None:
         return None
     result = body.get("response")
     if not isinstance(result, dict):

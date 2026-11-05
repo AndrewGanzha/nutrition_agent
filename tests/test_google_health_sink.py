@@ -27,9 +27,9 @@ class Recorder:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        if len(self.responses) > 1:
-            return self.responses.pop(0)
-        return self.responses[0]
+        if not self.responses:
+            raise AssertionError(f"unexpected request to {request.url}")
+        return self.responses.pop(0)
 
     def payloads(self) -> list[dict[str, Any]]:
         return [json.loads(request.content) for request in self.requests]
@@ -136,6 +136,7 @@ async def test_unknown_meal_and_missing_values_are_omitted(tmp_path: Path) -> No
     async with _sink(tmp_path, recorder) as sink:
         await sink.write(entry)
 
+    assert len(recorder.requests) == 1
     payload = recorder.payloads()[0]["nutritionLog"]
     assert payload["foodDisplayName"] == "вода"
     for absent in ("mealType", "energy", "totalCarbohydrate", "totalFat", "nutrients", "serving"):
@@ -149,6 +150,7 @@ async def test_interval_keeps_eaten_at_offset(tmp_path: Path) -> None:
     async with _sink(tmp_path, recorder) as sink:
         await sink.write(_entry(eaten_at=moscow))
 
+    assert len(recorder.requests) == 1
     interval = recorder.payloads()[0]["nutritionLog"]["interval"]
     assert interval["startTime"] == "2026-11-05T12:30:00+03:00"
     assert interval["startUtcOffset"] == "10800s"
@@ -180,14 +182,18 @@ async def test_one_failed_item_does_not_stop_the_rest(tmp_path: Path) -> None:
 
 async def test_repeat_write_skips_known_items_without_http(tmp_path: Path) -> None:
     recorder = Recorder(_created())
+    tokens = TokenStub()
     entry = _entry()
 
-    async with _sink(tmp_path, recorder) as sink:
+    async with _sink(tmp_path, recorder, token_provider=tokens) as sink:
         await sink.write(entry)
+        after_first = list(tokens.users)
         second = await sink.write(entry)
 
     assert [item.status for item in second.items] == ["skipped"]
     assert len(recorder.requests) == 1
+    assert after_first == [None]
+    assert tokens.users == after_first
 
 
 async def test_backfill_posts_only_missing_items(tmp_path: Path) -> None:
@@ -205,6 +211,41 @@ async def test_backfill_posts_only_missing_items(tmp_path: Path) -> None:
         "item-1",
         "item-1",
     ]
+
+
+async def test_network_error_fails_item_and_is_retried(tmp_path: Path) -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("boom")
+        return _created()
+
+    async with _sink(tmp_path, handler) as sink:
+        first = await sink.write(_entry())
+        second = await sink.write(_entry())
+
+    assert first.items[0].status == "failed"
+    assert first.items[0].error == "request failed: boom"
+    assert second.items[0].status == "written"
+    assert calls == 2
+
+
+async def test_failed_operation_body_marks_item_failed(tmp_path: Path) -> None:
+    recorder = Recorder(
+        httpx.Response(
+            200,
+            json={"name": "operations/1", "done": True, "error": {"code": 3, "message": "bad"}},
+        )
+    )
+
+    async with _sink(tmp_path, recorder) as sink:
+        result = await sink.write(_entry())
+
+    assert result.items[0].status == "failed"
+    assert result.items[0].error == "operation failed: bad"
 
 
 async def test_token_provider_receives_user_id(tmp_path: Path) -> None:
