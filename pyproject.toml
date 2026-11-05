@@ -47,10 +47,12 @@ known-first-party = ["nutrition_agent"]
 "src/nutrition_agent/extraction.py" = ["RUF001"]
 # Google payloads carry Russian food names and units ("150 г") on purpose.
 "src/nutrition_agent/sinks/google_health.py" = ["RUF001"]
+# The smoke script feeds and prints Russian meal text.
+"scripts/**" = ["RUF001"]
 # Tests feed realistic Russian meal text to the pipeline.
 "tests/**" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts", "examples"]
