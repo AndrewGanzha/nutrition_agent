@@ -24,6 +24,12 @@ from nutrition_agent.llm import (
     TextPart,
 )
 from nutrition_agent.results import ProcessResult, ProcessStatus
+from nutrition_agent.routing import (
+    InputStatus,
+    PreparedInput,
+    detect_image_mime,
+    prepare_input,
+)
 from nutrition_agent.sinks import (
     FakeSink,
     ItemStatus,
@@ -41,6 +47,7 @@ __all__ = [
     "FakeSink",
     "FoodItem",
     "ImagePart",
+    "InputStatus",
     "ItemStatus",
     "ItemWrite",
     "LLMClient",
@@ -50,6 +57,7 @@ __all__ = [
     "Message",
     "NutritionEntry",
     "OpenAICompatibleLLM",
+    "PreparedInput",
     "ProcessResult",
     "ProcessStatus",
     "RetryConfig",
@@ -59,5 +67,7 @@ __all__ = [
     "SinkResult",
     "TextPart",
     "TimeoutConfig",
+    "detect_image_mime",
     "extract_meal",
+    "prepare_input",
 ]

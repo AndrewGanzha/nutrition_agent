@@ -45,6 +45,8 @@ known-first-party = ["nutrition_agent"]
 # The Russian extraction prompt is prose, not identifiers: Cyrillic letters that
 # look Latin are intentional there.
 "src/nutrition_agent/extraction.py" = ["RUF001"]
+# Tests feed realistic Russian meal text to the pipeline.
+"tests/**" = ["RUF001"]
 
 [tool.mypy]
 python_version = "3.11"
