@@ -12,25 +12,17 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    StringConstraints,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+from nutrition_agent._types import STRICT_MODEL_CONFIG, NonEmptyStr
+
 PositiveSeconds = Annotated[float, Field(gt=0, allow_inf_nan=False)]
-
-_STRICT = ConfigDict(frozen=True, extra="forbid")
 
 
 class LLMConfig(BaseModel):
     """OpenAI-compatible chat/vision endpoint (DeepSeek by default)."""
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     base_url: NonEmptyStr = "https://api.deepseek.com/v1"
     api_key: str = ""
@@ -42,7 +34,7 @@ class LLMConfig(BaseModel):
 class STTConfig(BaseModel):
     """OpenAI-compatible transcription endpoint (used from phase 2 on)."""
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     base_url: NonEmptyStr = "https://api.openai.com/v1"
     api_key: str = ""
@@ -53,7 +45,7 @@ class STTConfig(BaseModel):
 class RetryPolicy(BaseModel):
     """Attempt budget and exponential backoff for one component."""
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     # Deliberately no default. Pydantic does not merge a nested payload with the
     # component-level default, so any default here would turn a partial override
@@ -73,7 +65,7 @@ class RetryPolicy(BaseModel):
 class RetryConfig(BaseModel):
     """Per-component retry policies."""
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     llm: RetryPolicy = Field(default_factory=lambda: RetryPolicy(max_attempts=3))
     stt: RetryPolicy = Field(default_factory=lambda: RetryPolicy(max_attempts=2))
@@ -84,7 +76,7 @@ class RetryConfig(BaseModel):
 class TimeoutConfig(BaseModel):
     """Per-component timeouts, in seconds."""
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     llm: PositiveSeconds = 30.0
     stt: PositiveSeconds = 60.0
@@ -103,7 +95,7 @@ class AgentConfig(BaseModel):
     sinks whose ``name`` is not listed are not called at all.
     """
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     stt: STTConfig = Field(default_factory=STTConfig)

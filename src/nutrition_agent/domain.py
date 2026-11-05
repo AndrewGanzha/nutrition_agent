@@ -12,19 +12,11 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import (
-    UUID4,
-    AwareDatetime,
-    BaseModel,
-    ConfigDict,
-    Field,
-    StringConstraints,
-)
+from pydantic import UUID4, AwareDatetime, BaseModel, Field, field_validator
 
-NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+from nutrition_agent._types import STRICT_MODEL_CONFIG, NonEmptyStr
+
 NonNegative = Annotated[float, Field(ge=0, allow_inf_nan=False)]
-
-_STRICT = ConfigDict(frozen=True, extra="forbid")
 
 
 class MealType(StrEnum):
@@ -38,7 +30,7 @@ class MealType(StrEnum):
 class FoodItem(BaseModel):
     """One dish or ingredient inside a meal."""
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     name: NonEmptyStr
     grams: NonNegative | None = None
@@ -52,14 +44,21 @@ class FoodItem(BaseModel):
 class NutritionEntry(BaseModel):
     """One meal: what was eaten, when, and how it was parsed."""
 
-    model_config = _STRICT
+    model_config = STRICT_MODEL_CONFIG
 
     id: UUID4 = Field(default_factory=uuid4)
     eaten_at: AwareDatetime
     meal_type: MealType = MealType.UNKNOWN
     items: list[FoodItem] = Field(min_length=1)
     source: Literal["text", "audio", "image", "mixed"]
-    notes: NonEmptyStr | None = None
+    notes: str | None = None
+
+    @field_validator("notes")
+    @classmethod
+    def _blank_notes_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
     @property
     def total_grams(self) -> float | None:

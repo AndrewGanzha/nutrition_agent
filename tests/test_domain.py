@@ -84,6 +84,12 @@ def test_totals_are_none_when_no_item_knows_the_value() -> None:
     assert entry.total_grams == 250
 
 
+def test_blank_notes_normalize_to_none() -> None:
+    assert _entry(notes="").notes is None
+    assert _entry(notes="   ").notes is None
+    assert _entry(notes="  домашнее  ").notes == "домашнее"
+
+
 def test_meal_type_defaults_to_unknown() -> None:
     assert _entry().meal_type is MealType.UNKNOWN
 
