@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -11,7 +12,7 @@ from nutrition_agent.agent import NutritionAgent
 from nutrition_agent.config import AgentConfig
 from nutrition_agent.domain import FoodItem, NutritionEntry
 from nutrition_agent.llm import LLMError, Messages
-from nutrition_agent.sinks import FakeSink, Sink
+from nutrition_agent.sinks import FakeSink, ItemStatus, ItemWrite, Sink, SinkResult
 
 EATEN_AT = datetime(2026, 11, 5, 12, 30, tzinfo=UTC)
 
@@ -73,9 +74,10 @@ def _agent(
     transcriber: StubTranscriber | None = None,
     debug: bool = False,
     sink_order: tuple[str, ...] = ("sqlite", "google_health"),
+    commit_ttl: timedelta = timedelta(minutes=15),
 ) -> NutritionAgent:
     return NutritionAgent(
-        AgentConfig(sink_order=sink_order, debug=debug),
+        AgentConfig(sink_order=sink_order, debug=debug, commit_ttl=commit_ttl),
         llm=llm or StubLLM([MEAL_JSON]),
         transcriber=transcriber,
         sinks=sinks if sinks is not None else [FakeSink("sqlite"), FakeSink("google_health")],
@@ -349,3 +351,118 @@ async def test_write_dry_run_skips_sinks_and_returns_token() -> None:
     assert result.commit_token
     assert result.sink_results == []
     assert sqlite.calls == []
+
+
+class ToggleSink:
+    """Sink that fails every item until ``failing`` is switched off."""
+
+    name = "google_health"
+
+    def __init__(self) -> None:
+        self.failing = True
+        self.calls: list[tuple[NutritionEntry, str | None]] = []
+
+    async def write(self, entry: NutritionEntry, *, user_id: str | None = None) -> SinkResult:
+        self.calls.append((entry, user_id))
+        status: ItemStatus = "failed" if self.failing else "written"
+        return SinkResult(
+            name=self.name,
+            items=[
+                ItemWrite(
+                    index=index,
+                    status=status,
+                    error="401 token expired" if self.failing else None,
+                )
+                for index in range(len(entry.items))
+            ],
+        )
+
+
+async def test_commit_writes_dry_run_entry_without_llm() -> None:
+    llm = StubLLM([MEAL_JSON])
+    sqlite = FakeSink("sqlite")
+    agent = _agent(llm, sinks=[sqlite])
+
+    preview = await agent.process(text="две котлеты", dry_run=True)
+    assert preview.commit_token is not None
+    result = await agent.commit(preview.commit_token)
+
+    assert result.status == "ok"
+    assert result.entry == preview.entry
+    assert [call.entry for call in sqlite.calls] == [preview.entry]
+    assert len(llm.calls) == 1
+
+
+async def test_commit_forwards_user_id_from_token() -> None:
+    sqlite = FakeSink("sqlite")
+    agent = _agent(sinks=[sqlite])
+
+    preview = await agent.process(text="борщ", dry_run=True, user_id="u-1")
+    assert preview.commit_token is not None
+    await agent.commit(preview.commit_token)
+
+    assert [call.user_id for call in sqlite.calls] == ["u-1"]
+
+
+async def test_partial_commit_keeps_token_until_success() -> None:
+    sqlite = FakeSink("sqlite")
+    google = ToggleSink()
+    agent = _agent(sinks=[sqlite, google])
+
+    preview = await agent.process(text="борщ", dry_run=True)
+    token = preview.commit_token
+    assert token is not None
+
+    first = await agent.commit(token)
+    assert first.status == "partial"
+    assert len(google.calls) == 1
+
+    google.failing = False
+    second = await agent.commit(token)
+    assert second.status == "ok"
+    assert len(google.calls) == 2
+    assert len(sqlite.calls) == 2
+
+    third = await agent.commit(token)
+    assert third.status == "error"
+    assert third.error == "unknown or already committed token"
+    assert len(google.calls) == 2
+
+
+async def test_failed_commit_keeps_token() -> None:
+    google = ToggleSink()
+    agent = _agent(sinks=[google])
+
+    preview = await agent.process(text="борщ", dry_run=True)
+    token = preview.commit_token
+    assert token is not None
+
+    first = await agent.commit(token)
+    assert first.status == "error"
+
+    google.failing = False
+    second = await agent.commit(token)
+    assert second.status == "ok"
+
+
+async def test_expired_token_is_rejected_without_sink_calls() -> None:
+    sqlite = FakeSink("sqlite")
+    agent = _agent(sinks=[sqlite], commit_ttl=timedelta(microseconds=1))
+
+    preview = await agent.process(text="борщ", dry_run=True)
+    token = preview.commit_token
+    assert token is not None
+    await asyncio.sleep(0.01)
+
+    result = await agent.commit(token)
+
+    assert result.status == "error"
+    assert result.error == "commit token expired"
+    assert sqlite.calls == []
+
+
+async def test_unknown_token_is_error() -> None:
+    result = await _agent().commit("no-such-token")
+
+    assert result.status == "error"
+    assert result.error == "unknown or already committed token"

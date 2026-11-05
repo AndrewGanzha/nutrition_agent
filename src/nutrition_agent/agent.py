@@ -128,6 +128,25 @@ class NutritionAgent:
         """
         return await self._deliver(entry, user_id, dry_run=dry_run)
 
+    async def commit(self, token: str) -> ProcessResult:
+        """Write the entry remembered by a dry-run token.
+
+        The token survives ``partial`` and ``error`` results so the caller can
+        retry and let the sinks fill in whatever is still missing; only a fully
+        successful write spends it. Expired and already spent tokens are errors.
+        """
+        pending = self._pending.get(token)
+        if pending is None:
+            return ProcessResult(status="error", error="unknown or already committed token")
+        if pending.expires_at <= datetime.now(UTC):
+            del self._pending[token]
+            return ProcessResult(status="error", error="commit token expired")
+
+        result = await self._deliver(pending.entry, pending.user_id, dry_run=False)
+        if result.status == "ok":
+            del self._pending[token]
+        return result
+
     async def _deliver(
         self,
         entry: NutritionEntry,
