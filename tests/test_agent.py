@@ -491,6 +491,7 @@ async def test_partial_write_logs_one_warning_per_failed_item(
     assert extra["sink"] == "google_health"
     assert extra["user_id"] == "u-1"
     assert extra["item_idx"] == 1
+    assert extra["error"] == "fake failure"
     assert isinstance(extra["duration_ms"], float)
 
 
@@ -506,6 +507,7 @@ async def test_sink_completion_is_logged_with_duration(caplog: pytest.LogCapture
     assert len(finished) == 1
     extra = _extra(finished[0])
     assert extra["entry_id"] == str(entry.id)
+    assert extra["sink"] == "sqlite"
     assert extra["user_id"] == "u-1"
     assert isinstance(extra["duration_ms"], float)
 
@@ -515,11 +517,19 @@ async def test_raw_response_is_never_logged(caplog: pytest.LogCaptureFixture) ->
     llm = StubLLM([raw, raw])
 
     with caplog.at_level(logging.DEBUG):
-        result = await _agent(llm, sinks=[], debug=True).process(text="борщ")
+        failed = await _agent(llm, sinks=[], debug=True).process(text="борщ")
+        noisy = await _agent(
+            StubLLM([MEAL_JSON]),
+            sinks=[FakeSink("sqlite", raises=RuntimeError("boom"))],
+            debug=True,
+        ).process(text="борщ")
 
-    assert result.status == "parse_failed"
-    assert result.raw_response == raw
+    assert failed.status == "parse_failed"
+    assert failed.raw_response == raw
+    assert noisy.raw_response == MEAL_JSON
+    assert caplog.records  # the dispatch log path really ran
     assert "RAW-MARKER" not in caplog.text
+    assert all("RAW-MARKER" not in repr(record.__dict__) for record in caplog.records)
 
 
 class GatedSink:
@@ -534,8 +544,9 @@ class GatedSink:
 
     async def write(self, entry: NutritionEntry, *, user_id: str | None = None) -> SinkResult:
         self.calls += 1
-        self.started.set()
-        await self.release.wait()
+        if self.calls == 1:
+            self.started.set()
+            await self.release.wait()
         return SinkResult(
             name=self.name,
             items=[ItemWrite(index=index, status="written") for index in range(len(entry.items))],
@@ -559,3 +570,24 @@ async def test_concurrent_commit_dispatches_once() -> None:
     sink.release.set()
     assert (await first).status == "ok"
     assert sink.calls == 1
+
+
+async def test_cancelled_commit_keeps_token() -> None:
+    sink = GatedSink()
+    agent = _agent(sinks=[sink])
+
+    preview = await agent.process(text="борщ", dry_run=True)
+    token = preview.commit_token
+    assert token is not None
+
+    task = asyncio.create_task(agent.commit(token))
+    await sink.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    sink.release.set()
+    retried = await agent.commit(token)
+
+    assert retried.status == "ok"
+    assert sink.calls == 2

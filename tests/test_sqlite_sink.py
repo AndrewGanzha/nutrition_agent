@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 from nutrition_agent.domain import FoodItem, NutritionEntry
@@ -114,3 +114,66 @@ def test_sqlite_sink_satisfies_protocol(tmp_path: Path) -> None:
 
     assert isinstance(sink, Sink)
     assert sink.name == "sqlite"
+
+
+async def test_entries_on_uses_utc_bounds_and_orders_by_eaten_at(tmp_path: Path) -> None:
+    sink = LocalSQLiteSink(tmp_path / "nutrition.db")
+    midnight = _entry(eaten_at=datetime(2026, 11, 5, 0, 0, tzinfo=UTC), item_count=1)
+    last_microsecond = _entry(
+        eaten_at=datetime(2026, 11, 5, 23, 59, 59, 999999, tzinfo=UTC), item_count=1
+    )
+    next_midnight = _entry(eaten_at=datetime(2026, 11, 6, 0, 0, tzinfo=UTC), item_count=1)
+    # 01:00+03:00 is 22:00Z on the previous day: the day filter is UTC-based.
+    offset_entry = _entry(
+        eaten_at=datetime(2026, 11, 6, 1, 0, tzinfo=timezone(timedelta(hours=3))), item_count=1
+    )
+    dinner = _entry(eaten_at=datetime(2026, 11, 5, 19, 0, tzinfo=UTC), item_count=1)
+
+    for entry in (dinner, next_midnight, last_microsecond, offset_entry, midnight):
+        await sink.write(entry, user_id="a")
+
+    assert await sink.entries_on(DAY, user_id="a") == [
+        midnight,
+        dinner,
+        offset_entry,
+        last_microsecond,
+    ]
+
+
+async def test_failed_ledger_row_is_retried_as_written(tmp_path: Path) -> None:
+    path = tmp_path / "nutrition.db"
+    sink = LocalSQLiteSink(path)
+    entry = _entry()
+
+    await sink.write(entry)
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE sink_writes SET status = 'failed' WHERE item_idx = 1")
+
+    second = await sink.write(entry)
+
+    assert [item.status for item in second.items] == ["skipped", "written"]
+    with sqlite3.connect(path) as db:
+        statuses = dict(db.execute("SELECT item_idx, status FROM sink_writes"))
+    assert statuses == {0: "written", 1: "written"}
+
+
+async def test_items_row_is_restored_even_when_ledger_says_written(tmp_path: Path) -> None:
+    path = tmp_path / "nutrition.db"
+    sink = LocalSQLiteSink(path)
+    entry = _entry()
+
+    await sink.write(entry)
+    with sqlite3.connect(path) as db:
+        db.execute("DELETE FROM items WHERE idx = 1")
+
+    second = await sink.write(entry)
+
+    assert [item.status for item in second.items] == ["skipped", "skipped"]
+    assert _table_counts(path) == (1, 2, 2)
+
+
+async def test_entries_on_existing_uninitialised_database_is_empty(tmp_path: Path) -> None:
+    path = tmp_path / "empty.db"
+    path.write_bytes(b"")
+
+    assert await LocalSQLiteSink(path).entries_on(DAY) == []

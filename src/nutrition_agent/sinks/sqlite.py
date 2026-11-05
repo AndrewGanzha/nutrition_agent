@@ -181,6 +181,8 @@ class LocalSQLiteSink:
         query += " ORDER BY eaten_at, id"
 
         async with aiosqlite.connect(self._path, timeout=self._timeout) as db:
+            # An existing but never-initialised file must read as empty.
+            await ensure_schema(db)
             cursor = await db.execute(query, params)
             rows = await cursor.fetchall()
             await cursor.close()

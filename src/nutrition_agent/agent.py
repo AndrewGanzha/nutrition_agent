@@ -149,10 +149,19 @@ class NutritionAgent:
         del self._pending[token]
         self._purge_expired()
 
-        result = await self._deliver(pending.entry, pending.user_id, dry_run=False)
+        try:
+            result = await self._deliver(pending.entry, pending.user_id, dry_run=False)
+        except BaseException:
+            # Cancellation/timeout must not burn a token it did not spend.
+            self._restore(token, pending)
+            raise
         if result.status != "ok":
-            self._pending[token] = pending
+            self._restore(token, pending)
         return result
+
+    def _restore(self, token: str, pending: _PendingCommit) -> None:
+        if pending.expires_at > datetime.now(UTC):
+            self._pending[token] = pending
 
     def _purge_expired(self) -> None:
         now = datetime.now(UTC)

@@ -111,12 +111,14 @@ class GoogleHealthSink:
                 response = await client.post(URL, json=payload, headers=headers)
             except httpx.HTTPError as exc:
                 await record_item_write(db, entry_id, self.name, index, status="failed")
+                await db.commit()
                 items.append(
                     ItemWrite(index=index, status="failed", error=f"request failed: {exc}")
                 )
                 continue
             if not response.is_success:
                 await record_item_write(db, entry_id, self.name, index, status="failed")
+                await db.commit()
                 items.append(
                     ItemWrite(index=index, status="failed", error=_http_error(response))
                 )
@@ -125,6 +127,7 @@ class GoogleHealthSink:
             operation_error = _operation_error(body)
             if operation_error is not None:
                 await record_item_write(db, entry_id, self.name, index, status="failed")
+                await db.commit()
                 items.append(ItemWrite(index=index, status="failed", error=operation_error))
                 continue
             external_id = _operation_name(body)
