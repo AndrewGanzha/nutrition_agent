@@ -6,13 +6,18 @@ import socket
 
 import pytest
 
+from tests._offline import block
+
 
 @pytest.fixture(autouse=True)
 def _block_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make any real TCP connect fail loudly instead of reaching the network."""
+    """Make any real name resolution or packet send fail loudly."""
 
-    def blocked(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("network access is disabled in tests")
-
-    monkeypatch.setattr(socket.socket, "connect", blocked)
-    monkeypatch.setattr(socket.socket, "connect_ex", blocked)
+    monkeypatch.setattr(socket.socket, "connect", block)
+    monkeypatch.setattr(socket.socket, "connect_ex", block)
+    monkeypatch.setattr(socket.socket, "sendto", block)
+    monkeypatch.setattr(socket.socket, "sendmsg", block)
+    monkeypatch.setattr(socket, "getaddrinfo", block)
+    monkeypatch.setattr(socket, "gethostbyname", block)
+    monkeypatch.setattr(socket, "gethostbyname_ex", block)
+    monkeypatch.setattr(socket, "gethostbyaddr", block)

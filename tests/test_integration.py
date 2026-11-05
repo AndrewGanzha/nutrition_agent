@@ -108,3 +108,46 @@ async def test_full_text_pipeline_writes_both_sinks_once(tmp_path: Path) -> None
         assert _counts(db) == (1, 2, 4)
 
     assert await LocalSQLiteSink(db).entries_on(EATEN_AT.date()) == [result.entry]
+
+
+async def test_partial_google_write_is_backfilled_from_the_shared_ledger(tmp_path: Path) -> None:
+    db = tmp_path / "nutrition.db"
+    responses = [
+        httpx.Response(200, json={"name": "operations/1", "done": True}),
+        httpx.Response(500, text="boom"),
+        httpx.Response(200, json={"name": "operations/2", "done": True}),
+    ]
+    posted: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content))
+        return responses.pop(0)
+
+    def build(client: httpx.AsyncClient) -> NutritionAgent:
+        return NutritionAgent(
+            AgentConfig(sink_order=("sqlite", "google_health")),
+            llm=StubLLM(MEAL_JSON),
+            sinks=[
+                LocalSQLiteSink(db),
+                GoogleHealthSink(db, token_provider=TokenStub(), http_client=client),
+            ],
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        first = await build(client).process(text="две котлеты и гречка", eaten_at=EATEN_AT)
+    assert first.status == "partial"
+    assert [item.status for item in first.sink_results[0].items] == ["written", "written"]
+    assert [item.status for item in first.sink_results[1].items] == ["written", "failed"]
+    assert first.entry is not None
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        replay = await build(client).write(first.entry)
+
+    assert replay.status == "ok"
+    assert [item.status for item in replay.sink_results[0].items] == ["skipped", "skipped"]
+    assert [item.status for item in replay.sink_results[1].items] == ["skipped", "written"]
+    assert [payload["nutritionLog"]["foodDisplayName"] for payload in posted] == [
+        "котлета, 150 г",
+        "гречка, 200 г",
+        "гречка, 200 г",
+    ]
