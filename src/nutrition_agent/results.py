@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, get_args
 
 from nutrition_agent.domain import NutritionEntry
 from nutrition_agent.sinks.base import SinkResult
 
 ProcessStatus = Literal["ok", "partial", "ignored", "parse_failed", "invalid_input", "error"]
 
-_PROCESS_STATUSES: frozenset[str] = frozenset(
-    ("ok", "partial", "ignored", "parse_failed", "invalid_input", "error")
-)
+_PROCESS_STATUSES = get_args(ProcessStatus)
 
 
 @dataclass(frozen=True)

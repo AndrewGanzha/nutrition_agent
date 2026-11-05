@@ -9,13 +9,13 @@ construction time instead of being trusted from arbitrary implementations.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, get_args, runtime_checkable
 
 from nutrition_agent.domain import NutritionEntry
 
 ItemStatus = Literal["written", "skipped", "failed"]
 
-_ITEM_STATUSES: frozenset[str] = frozenset(("written", "skipped", "failed"))
+_ITEM_STATUSES = get_args(ItemStatus)
 
 
 @dataclass(frozen=True)

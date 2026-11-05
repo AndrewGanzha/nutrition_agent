@@ -59,7 +59,7 @@ def test_sink_with_empty_result_counts_as_failed() -> None:
     assert result.sinks_failed == ["sqlite"]
 
 
-def test_sink_that_skips_items_not_in_entry_counts_as_failed() -> None:
+def test_sink_missing_an_item_counts_as_failed() -> None:
     result = ProcessResult(
         status="partial",
         entry=_entry(2),
@@ -71,7 +71,7 @@ def test_sink_that_skips_items_not_in_entry_counts_as_failed() -> None:
     assert result.sinks_failed == ["sqlite"]
 
 
-def test_sink_must_not_report_indexes_outside_the_entry() -> None:
+def test_extra_indexes_outside_the_entry_count_as_failed() -> None:
     result = ProcessResult(
         status="partial",
         entry=_entry(1),
