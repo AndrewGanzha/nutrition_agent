@@ -81,8 +81,9 @@ agent = NutritionAgent(config, llm=llm, sinks=[sink])
 
 - 2xx → item `written`; имя data point (если API вернул его в Operation)
   сохраняется в `sink_writes.external_id`.
-- 401 (протухший access token), 4xx/5xx, сетевые ошибки → item `failed` с
-  текстом `HTTP <code>: <detail>`; остальные items всё равно отправляются.
-- Авторетраев нет (`retry.google.max_attempts = 1`): повторить запись можно
-  через `agent.write(entry)` или `agent.commit(token)` — уже записанные items
-  будут пропущены.
+- 401 (протухший access token) и прочие 4xx/5xx → item `failed` с текстом
+  `HTTP <code>: <detail>`; сетевые ошибки — `request failed: <exception>`.
+  Остальные items всё равно отправляются.
+- Авторетраев нет: sink всегда делает ровно один POST на item, `retry.google`
+  на него не влияет. Повторить запись можно через `agent.write(entry)` или
+  `agent.commit(token)` — уже записанные items будут пропущены.
