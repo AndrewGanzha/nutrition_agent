@@ -7,7 +7,7 @@ Required env:
 
 Optional env:
     SMOKE_IMAGE            path to a meal photo (image step is skipped without it)
-    SMOKE_USER_ID          user_id passed to the agent (default: anonymous)
+    SMOKE_USER_ID          user_id passed to the agent (default: None — anonymous)
     NUTRITION_DB           SQLite path (default: smoke.db)
     GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
                            enable the Google Health sink and its live write
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 from nutrition_agent import (
@@ -34,6 +35,12 @@ from nutrition_agent import (
     Sink,
 )
 
+# `examples/` is not an installed package: make it importable when the script is
+# run as `python scripts/smoke.py` from the repository root.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 TEXT = "Съел две котлеты и гречку 200г"
 
 
@@ -42,7 +49,10 @@ def _report(label: str, result: ProcessResult) -> bool:
     if result.error:
         print(f"[{label}] error={result.error}")
     for sink_result in result.sink_results:
-        statuses = ", ".join(f"{item.index}:{item.status}" for item in sink_result.items)
+        statuses = ", ".join(
+            f"{item.index}:{item.status}" + (f" ({item.error})" if item.error else "")
+            for item in sink_result.items
+        )
         print(f"[{label}] {sink_result.name}: {statuses}")
     if result.entry is not None:
         items = ", ".join(f"{item.name} {item.grams or '?'}г" for item in result.entry.items)
@@ -81,7 +91,10 @@ async def main() -> int:
         return 2
 
     user_id = os.environ.get("SMOKE_USER_ID")
-    config = AgentConfig(llm=LLMConfig(api_key=api_key), sqlite_path=Path("smoke.db"))
+    config = AgentConfig(
+        llm=LLMConfig(api_key=api_key),
+        sqlite_path=Path(os.environ.get("NUTRITION_DB", "smoke.db")),
+    )
     sinks: list[Sink] = [
         LocalSQLiteSink(config.sqlite_path, timeout=config.timeouts.sqlite)
     ]
@@ -101,10 +114,15 @@ async def main() -> int:
 
     image_path = os.environ.get("SMOKE_IMAGE")
     if image_path:
-        image_bytes = await asyncio.to_thread(Path(image_path).read_bytes)
-        image_result = await agent.process(image_bytes=image_bytes, user_id=user_id)
-        checks.append(_report("image", image_result))
-        checks.append(image_result.entry is not None and bool(image_result.entry.items))
+        try:
+            image_bytes = await asyncio.to_thread(Path(image_path).read_bytes)
+        except OSError as exc:
+            print(f"FAIL image: cannot read {image_path}: {exc}")
+            checks.append(False)
+        else:
+            image_result = await agent.process(image_bytes=image_bytes, user_id=user_id)
+            checks.append(_report("image", image_result))
+            checks.append(image_result.entry is not None and bool(image_result.entry.items))
     else:
         print("SKIP image: SMOKE_IMAGE is not set")
 
@@ -116,13 +134,14 @@ async def main() -> int:
         first = await agent.commit(preview.commit_token)
         checks.append(_report("commit", first))
         second = await agent.commit(preview.commit_token)
-        replay_ok = second.status == "error"
         _report("commit-replay", second)
-        checks.append(replay_ok)
+        # A partial/error commit keeps the token on purpose; only a burned token
+        # (full success) must reject the replay.
+        checks.append(first.status != "ok" or second.status == "error")
 
     failed = checks.count(False)
     print(f"\n{'FAIL' if failed else 'OK'}: {len(checks) - failed}/{len(checks)} checks passed")
-    if google is not None:
+    if google is not None and failed == 0:
         print("Check the Google Health test-user account for the nutrition-log entries.")
     return 1 if failed else 0
 
