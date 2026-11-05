@@ -29,6 +29,8 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
         ({"audio_bytes": b"ogg", "transcript": "две котлеты"}, "ok", "audio"),
         ({"text": "обед", "audio_bytes": b"ogg", "transcript": "две котлеты"}, "ok", "mixed"),
         ({"audio_bytes": b"ogg"}, "invalid_input", None),
+        ({"audio_bytes": b"ogg", "transcript": "  "}, "invalid_input", None),
+        ({"text": "обед", "audio_bytes": b"ogg", "transcript": ""}, "invalid_input", None),
         ({"transcript": "две котлеты"}, "invalid_input", None),
         ({"audio_bytes": b"ogg", "image_bytes": PNG, "transcript": "x"}, "invalid_input", None),
         (
@@ -153,3 +155,8 @@ def test_missing_eaten_at_defaults_to_now_in_utc() -> None:
 def test_ok_prepared_input_requires_content() -> None:
     with pytest.raises(ValueError, match="ok input is missing"):
         PreparedInput(status="ok")
+
+
+def test_invalid_input_requires_error() -> None:
+    with pytest.raises(ValueError, match="missing an error message"):
+        PreparedInput(status="invalid_input")

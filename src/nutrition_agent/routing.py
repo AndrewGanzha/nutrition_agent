@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
+from nutrition_agent._types import blank_to_none
 from nutrition_agent.domain import EntrySource
 from nutrition_agent.llm import ContentPart, ImagePart, TextPart
 
@@ -64,12 +65,12 @@ def prepare_input(
         return _invalid("eaten_at must be timezone-aware")
     eaten = eaten_at or datetime.now(UTC)
 
-    clean_text = text.strip() if text else ""
-    clean_transcript = transcript.strip() if transcript else ""
+    clean_text = blank_to_none(text)
+    clean_transcript = blank_to_none(transcript)
 
-    if transcript is not None and audio_bytes is None:
+    if clean_transcript is not None and audio_bytes is None:
         return _invalid("transcript requires audio_bytes")
-    if audio_bytes is not None and transcript is None:
+    if audio_bytes is not None and clean_transcript is None:
         return _invalid("audio input requires a transcript")
     if audio_bytes is not None and image_bytes is not None:
         return _invalid("audio and image cannot be combined")
@@ -91,7 +92,7 @@ def prepare_input(
     )
 
     source = _source(
-        has_text=bool(clean_text),
+        has_text=clean_text is not None,
         has_audio=audio_bytes is not None,
         has_image=image_bytes is not None,
     )
@@ -120,7 +121,9 @@ def detect_image_mime(data: bytes) -> str | None:
     return None
 
 
-def _content(*, text: str, transcript: str, image_part: ImagePart | None) -> UserContent:
+def _content(
+    *, text: str | None, transcript: str | None, image_part: ImagePart | None
+) -> UserContent:
     joined = "\n\n".join(part for part in (transcript, text) if part)
     if image_part is None:
         return joined
