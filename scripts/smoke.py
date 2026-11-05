@@ -95,9 +95,7 @@ async def main() -> int:
         llm=LLMConfig(api_key=api_key),
         sqlite_path=Path(os.environ.get("NUTRITION_DB", "smoke.db")),
     )
-    sinks: list[Sink] = [
-        LocalSQLiteSink(config.sqlite_path, timeout=config.timeouts.sqlite)
-    ]
+    sinks: list[Sink] = [LocalSQLiteSink(config.sqlite_path, timeout=config.timeouts.sqlite)]
     google = _google_sink(config, user_id)
     if google is not None:
         sinks.append(google)
@@ -108,9 +106,7 @@ async def main() -> int:
 
     text_result = await agent.process(text=TEXT, user_id=user_id)
     checks.append(_report("text", text_result))
-    checks.append(
-        text_result.entry is not None and len(text_result.entry.items) >= 2
-    )
+    checks.append(text_result.entry is not None and len(text_result.entry.items) >= 2)
 
     image_path = os.environ.get("SMOKE_IMAGE")
     if image_path:

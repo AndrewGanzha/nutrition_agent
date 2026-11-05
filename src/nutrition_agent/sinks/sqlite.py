@@ -58,9 +58,7 @@ async def ensure_schema(db: aiosqlite.Connection) -> None:
     await db.executescript(SCHEMA)
 
 
-async def finished_item_indexes(
-    db: aiosqlite.Connection, entry_id: str, sink: str
-) -> set[int]:
+async def finished_item_indexes(db: aiosqlite.Connection, entry_id: str, sink: str) -> set[int]:
     """Indexes this sink already stored (``written``/``skipped``) for the entry."""
     cursor = await db.execute(
         "SELECT item_idx FROM sink_writes"

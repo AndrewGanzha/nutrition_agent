@@ -501,9 +501,7 @@ async def test_sink_completion_is_logged_with_duration(caplog: pytest.LogCapture
     with caplog.at_level(logging.INFO, logger="nutrition_agent.agent"):
         await _agent(sinks=[FakeSink("sqlite")]).write(entry, user_id="u-1")
 
-    finished = [
-        record for record in caplog.records if record.getMessage() == "sink write finished"
-    ]
+    finished = [record for record in caplog.records if record.getMessage() == "sink write finished"]
     assert len(finished) == 1
     extra = _extra(finished[0])
     assert extra["entry_id"] == str(entry.id)

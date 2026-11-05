@@ -119,9 +119,7 @@ class GoogleHealthSink:
             if not response.is_success:
                 await record_item_write(db, entry_id, self.name, index, status="failed")
                 await db.commit()
-                items.append(
-                    ItemWrite(index=index, status="failed", error=_http_error(response))
-                )
+                items.append(ItemWrite(index=index, status="failed", error=_http_error(response)))
                 continue
             body = _json_body(response)
             operation_error = _operation_error(body)
@@ -197,8 +195,10 @@ def _operation_error(body: dict[str, Any] | None) -> str | None:
         return None
     error = body["error"]
     message = error.get("message") if isinstance(error, dict) else None
-    return f"operation failed: {message}" if isinstance(message, str) and message else (
-        "operation failed"
+    return (
+        f"operation failed: {message}"
+        if isinstance(message, str) and message
+        else ("operation failed")
     )
 
 
