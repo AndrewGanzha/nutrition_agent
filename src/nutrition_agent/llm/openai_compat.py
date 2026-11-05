@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from typing import Any
+from typing import Any, cast
 
 import openai
 from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletion
+from openai.types.responses import Response as ResponsesResponse
 
 from nutrition_agent.config import LLMConfig, RetryPolicy
 from nutrition_agent.llm.base import ImagePart, LLMError, Message, Messages
@@ -107,21 +109,19 @@ class OpenAICompatibleLLM:
                 {"role": message.role, "content": _chat_content(message)} for message in messages
             ],
             "extra_body": {"thinking": {"type": "disabled"}},
+            "response_format": {"type": "json_object"},
         }
-        if schema is not None:
-            payload["response_format"] = {"type": "json_object"}
         return payload
 
-    async def _send(self, payload: dict[str, Any]) -> Any:
+    async def _send(self, payload: dict[str, Any]) -> ResponsesResponse | ChatCompletion:
         if self._config.api == "responses":
-            return await self._client.responses.create(**payload)
-        return await self._client.chat.completions.create(**payload)
+            return cast(ResponsesResponse, await self._client.responses.create(**payload))
+        return cast(ChatCompletion, await self._client.chat.completions.create(**payload))
 
-    def _extract(self, response: Any) -> str:
-        if self._config.api == "responses":
-            return str(response.output_text)
-        content = response.choices[0].message.content
-        return content or ""
+    def _extract(self, response: ResponsesResponse | ChatCompletion) -> str:
+        if isinstance(response, ChatCompletion):
+            return response.choices[0].message.content or ""
+        return response.output_text
 
 
 def _contains_image(messages: Messages) -> bool:

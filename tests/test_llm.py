@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 import pytest
@@ -32,7 +32,7 @@ def _llm(
     )
 
 
-def _responses_body(text: str) -> dict[str, object]:
+def _responses_body(text: str) -> dict[str, Any]:
     return {
         "id": "resp_1",
         "object": "response",
@@ -51,7 +51,7 @@ def _responses_body(text: str) -> dict[str, object]:
     }
 
 
-def _chat_body(text: str) -> dict[str, object]:
+def _chat_body(text: str) -> dict[str, Any]:
     return {
         "id": "chatcmpl-1",
         "object": "chat.completion",
@@ -63,7 +63,7 @@ def _chat_body(text: str) -> dict[str, object]:
     }
 
 
-def _recorder(bodies: list[httpx.Response], seen: list[dict[str, object]]) -> Handler:
+def _recorder(bodies: list[httpx.Response], seen: list[dict[str, Any]]) -> Handler:
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(json.loads(request.content))
         return bodies[0] if len(bodies) == 1 else bodies.pop(0)
@@ -72,7 +72,7 @@ def _recorder(bodies: list[httpx.Response], seen: list[dict[str, object]]) -> Ha
 
 
 async def test_responses_request_carries_strict_json_schema() -> None:
-    seen: list[dict[str, object]] = []
+    seen: list[dict[str, Any]] = []
     llm = _llm(_recorder([httpx.Response(200, json=_responses_body('{"ok": true}'))], seen))
     schema: dict[str, object] = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
@@ -88,11 +88,11 @@ async def test_responses_request_carries_strict_json_schema() -> None:
     assert payload["input"] == [{"role": "user", "content": "привет"}]
 
 
-async def test_chat_request_uses_json_object_without_schema() -> None:
-    seen: list[dict[str, object]] = []
+async def test_chat_request_always_sets_json_object() -> None:
+    seen: list[dict[str, Any]] = []
     llm = _llm(_recorder([httpx.Response(200, json=_chat_body('{"ok": true}'))], seen), api="chat")
 
-    text = await llm.complete([Message("user", "привет")], schema={"type": "object"})
+    text = await llm.complete([Message("user", "привет")])
 
     assert text == '{"ok": true}'
     payload = seen[0]
@@ -103,7 +103,7 @@ async def test_chat_request_uses_json_object_without_schema() -> None:
 
 
 async def test_retry_stops_after_max_attempts_on_429() -> None:
-    seen: list[dict[str, object]] = []
+    seen: list[dict[str, Any]] = []
     body = {"error": {"message": "rate limited", "type": "rate_limit_error"}}
     llm = _llm(_recorder([httpx.Response(429, json=body)], seen), max_attempts=3)
 
@@ -113,8 +113,22 @@ async def test_retry_stops_after_max_attempts_on_429() -> None:
     assert len(seen) == 3
 
 
+async def test_successful_retry_after_server_error() -> None:
+    seen: list[dict[str, Any]] = []
+    error = {"error": {"message": "overloaded", "type": "server_error"}}
+    llm = _llm(
+        _recorder(
+            [httpx.Response(503, json=error), httpx.Response(200, json=_chat_body("{}"))], seen
+        ),
+        api="chat",
+    )
+
+    assert await llm.complete([Message("user", "привет")]) == "{}"
+    assert len(seen) == 2
+
+
 async def test_bad_request_is_not_retried() -> None:
-    seen: list[dict[str, object]] = []
+    seen: list[dict[str, Any]] = []
     body = {"error": {"message": "bad schema", "type": "invalid_request_error"}}
     llm = _llm(_recorder([httpx.Response(400, json=body)], seen))
 
@@ -142,7 +156,7 @@ async def test_timeout_is_retried() -> None:
 
 @pytest.mark.parametrize("api", ["responses", "chat"])
 async def test_image_is_sent_as_data_url_and_uses_vision_model(api: LLMApi) -> None:
-    seen: list[dict[str, object]] = []
+    seen: list[dict[str, Any]] = []
     image = b"\x89PNG\r\n\x1a\npayload"
     body = _responses_body("{}") if api == "responses" else _chat_body("{}")
     llm = OpenAICompatibleLLM(
@@ -161,11 +175,11 @@ async def test_image_is_sent_as_data_url_and_uses_vision_model(api: LLMApi) -> N
     payload = seen[0]
     assert payload["model"] == "vision-model"
     if api == "responses":
-        content = payload["input"][0]["content"]  # type: ignore[index]
+        content = payload["input"][0]["content"]
         assert content[0] == {"type": "input_text", "text": "что на фото?"}
         url = content[1]["image_url"]
     else:
-        content = payload["messages"][0]["content"]  # type: ignore[index]
+        content = payload["messages"][0]["content"]
         assert content[0] == {"type": "text", "text": "что на фото?"}
         url = content[1]["image_url"]["url"]
     assert url.startswith("data:image/png;base64,")
@@ -173,7 +187,7 @@ async def test_image_is_sent_as_data_url_and_uses_vision_model(api: LLMApi) -> N
 
 
 async def test_text_only_messages_use_text_model() -> None:
-    seen: list[dict[str, object]] = []
+    seen: list[dict[str, Any]] = []
     llm = _llm(
         _recorder([httpx.Response(200, json=_chat_body("{}"))], seen),
         api="chat",
