@@ -8,7 +8,13 @@ from nutrition_agent.config import (
     STTConfig,
     TimeoutConfig,
 )
-from nutrition_agent.domain import FoodItem, MealType, NutritionEntry
+from nutrition_agent.domain import EntrySource, FoodItem, MealType, NutritionEntry
+from nutrition_agent.extraction import (
+    ExtractedMeal,
+    ExtractionResult,
+    ExtractionStatus,
+    extract_meal,
+)
 from nutrition_agent.llm import (
     ImagePart,
     LLMClient,
@@ -28,6 +34,10 @@ from nutrition_agent.sinks import (
 
 __all__ = [
     "AgentConfig",
+    "EntrySource",
+    "ExtractedMeal",
+    "ExtractionResult",
+    "ExtractionStatus",
     "FakeSink",
     "FoodItem",
     "ImagePart",
@@ -49,4 +59,5 @@ __all__ = [
     "SinkResult",
     "TextPart",
     "TimeoutConfig",
+    "extract_meal",
 ]

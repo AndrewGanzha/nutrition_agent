@@ -10,4 +10,16 @@ NonEmptyStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length
 
 STRICT_MODEL_CONFIG = ConfigDict(frozen=True, extra="forbid")
 
-__all__ = ["STRICT_MODEL_CONFIG", "NonEmptyStr"]
+
+def blank_to_none(value: str | None) -> str | None:
+    """Strip text and collapse blanks to ``None``.
+
+    Models (LLM output in strict mode included) routinely emit ``""`` for
+    optional strings; an empty note means "no note", not a validation failure.
+    """
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+__all__ = ["STRICT_MODEL_CONFIG", "NonEmptyStr", "blank_to_none"]

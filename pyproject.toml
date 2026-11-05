@@ -41,6 +41,11 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "RUF"]
 [tool.ruff.lint.isort]
 known-first-party = ["nutrition_agent"]
 
+[tool.ruff.lint.per-file-ignores]
+# The Russian extraction prompt is prose, not identifiers: Cyrillic letters that
+# look Latin are intentional there.
+"src/nutrition_agent/extraction.py" = ["RUF001"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

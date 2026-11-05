@@ -14,9 +14,10 @@ from uuid import uuid4
 
 from pydantic import UUID4, AwareDatetime, BaseModel, Field, field_validator
 
-from nutrition_agent._types import STRICT_MODEL_CONFIG, NonEmptyStr
+from nutrition_agent._types import STRICT_MODEL_CONFIG, NonEmptyStr, blank_to_none
 
 NonNegative = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+EntrySource = Literal["text", "audio", "image", "mixed"]
 
 
 class MealType(StrEnum):
@@ -50,15 +51,13 @@ class NutritionEntry(BaseModel):
     eaten_at: AwareDatetime
     meal_type: MealType = MealType.UNKNOWN
     items: list[FoodItem] = Field(min_length=1)
-    source: Literal["text", "audio", "image", "mixed"]
+    source: EntrySource
     notes: str | None = None
 
     @field_validator("notes")
     @classmethod
     def _blank_notes_to_none(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return value.strip() or None
+        return blank_to_none(value)
 
     @property
     def total_grams(self) -> float | None:
@@ -87,4 +86,4 @@ def _sum_optional(values: Iterable[float | None]) -> float | None:
     return sum(present) if present else None
 
 
-__all__ = ["FoodItem", "MealType", "NutritionEntry"]
+__all__ = ["EntrySource", "FoodItem", "MealType", "NutritionEntry"]
