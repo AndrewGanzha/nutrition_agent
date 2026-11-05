@@ -8,10 +8,14 @@ from nutrition_agent.config import (
     STTConfig,
     TimeoutConfig,
 )
+from nutrition_agent.domain import FoodItem, MealType, NutritionEntry
 
 __all__ = [
     "AgentConfig",
+    "FoodItem",
     "LLMConfig",
+    "MealType",
+    "NutritionEntry",
     "RetryConfig",
     "RetryPolicy",
     "STTConfig",
