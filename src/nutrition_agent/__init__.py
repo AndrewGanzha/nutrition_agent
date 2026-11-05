@@ -1,5 +1,6 @@
 """Nutrition agent: turn free-form meal input into structured nutrition entries."""
 
+from nutrition_agent.agent import NutritionAgent
 from nutrition_agent.config import (
     AgentConfig,
     LLMConfig,
@@ -37,6 +38,7 @@ from nutrition_agent.sinks import (
     Sink,
     SinkResult,
 )
+from nutrition_agent.speech import Transcriber
 
 __all__ = [
     "AgentConfig",
@@ -55,6 +57,7 @@ __all__ = [
     "LLMError",
     "MealType",
     "Message",
+    "NutritionAgent",
     "NutritionEntry",
     "OpenAICompatibleLLM",
     "PreparedInput",
@@ -67,6 +70,7 @@ __all__ = [
     "SinkResult",
     "TextPart",
     "TimeoutConfig",
+    "Transcriber",
     "detect_image_mime",
     "extract_meal",
     "prepare_input",

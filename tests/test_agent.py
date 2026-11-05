@@ -1,0 +1,278 @@
+"""Tests for :mod:`nutrition_agent.agent`."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+
+import pytest
+
+from nutrition_agent.agent import NutritionAgent
+from nutrition_agent.config import AgentConfig
+from nutrition_agent.domain import NutritionEntry
+from nutrition_agent.llm import LLMError, Messages
+from nutrition_agent.sinks import FakeSink, Sink
+
+EATEN_AT = datetime(2026, 11, 5, 12, 30, tzinfo=UTC)
+
+MEAL_JSON = json.dumps(
+    {
+        "is_meal": True,
+        "meal_type": "lunch",
+        "items": [
+            {
+                "name": "котлета",
+                "grams": 150,
+                "kcal": 300,
+                "protein_g": 20,
+                "fat_g": 18,
+                "carbs_g": 8,
+                "confidence": 0.7,
+            }
+        ],
+        "notes": None,
+    },
+    ensure_ascii=False,
+)
+NOT_MEAL_JSON = json.dumps({"is_meal": False, "meal_type": "unknown", "items": [], "notes": None})
+
+
+class StubLLM:
+    def __init__(self, answers: list[str]) -> None:
+        self.answers = list(answers)
+        self.calls: list[Messages] = []
+        self.fails: Exception | None = None
+
+    async def complete(
+        self,
+        messages: Messages,
+        *,
+        schema: dict[str, object] | None = None,
+        schema_name: str = "result",
+    ) -> str:
+        self.calls.append(list(messages))
+        if self.fails is not None:
+            raise self.fails
+        return self.answers.pop(0)
+
+
+class StubTranscriber:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[bytes] = []
+
+    async def transcribe(self, audio: bytes, *, filename: str = "audio.ogg") -> str:
+        self.calls.append(audio)
+        return self.text
+
+
+def _agent(
+    llm: StubLLM | None = None,
+    *,
+    sinks: list[Sink] | None = None,
+    transcriber: StubTranscriber | None = None,
+    debug: bool = False,
+    sink_order: tuple[str, ...] = ("sqlite", "google_health"),
+) -> NutritionAgent:
+    return NutritionAgent(
+        AgentConfig(sink_order=sink_order, debug=debug),
+        llm=llm or StubLLM([MEAL_JSON]),
+        transcriber=transcriber,
+        sinks=sinks if sinks is not None else [FakeSink("sqlite"), FakeSink("google_health")],
+    )
+
+
+async def test_text_input_is_written_to_all_sinks() -> None:
+    sqlite, google = FakeSink("sqlite"), FakeSink("google_health")
+
+    result = await _agent(sinks=[google, sqlite]).process(text="две котлеты")
+
+    assert result.status == "ok"
+    assert result.entry is not None
+    assert result.entry.source == "text"
+    assert [item.name for item in result.entry.items] == ["котлета"]
+    assert [sink_result.name for sink_result in result.sink_results] == ["sqlite", "google_health"]
+    assert [call.entry for call in sqlite.calls] == [result.entry]
+    assert [call.entry for call in google.calls] == [result.entry]
+    assert result.sinks_succeeded == ["sqlite", "google_health"]
+    assert result.raw_response is None
+
+
+async def test_sinks_not_in_order_are_not_called() -> None:
+    extra = FakeSink("fitatu")
+    sqlite = FakeSink("sqlite")
+
+    result = await _agent(sinks=[extra, sqlite]).process(text="борщ")
+
+    assert result.status == "ok"
+    assert extra.calls == []
+    assert result.sinks_succeeded == ["sqlite"]
+
+
+async def test_raising_sink_does_not_stop_the_chain() -> None:
+    sqlite = FakeSink("sqlite")
+    google = FakeSink("google_health", raises=RuntimeError("401 token expired"))
+
+    result = await _agent(sinks=[sqlite, google]).process(text="борщ")
+
+    assert result.status == "partial"
+    assert len(sqlite.calls) == 1
+    assert len(google.calls) == 1
+    google_result = result.sink_results[1]
+    assert [item.status for item in google_result.items] == ["failed"]
+    assert google_result.items[0].error == "401 token expired"
+
+
+async def test_all_sinks_failing_is_error() -> None:
+    sinks: list[Sink] = [
+        FakeSink("sqlite", raises=RuntimeError("db locked")),
+        FakeSink("google_health", raises=RuntimeError("401")),
+    ]
+
+    result = await _agent(sinks=sinks).process(text="борщ")
+
+    assert result.status == "error"
+    assert result.entry is not None
+    assert result.error == "no sink wrote the entry"
+    assert result.sinks_failed == ["sqlite", "google_health"]
+
+
+async def test_item_level_failure_makes_status_partial() -> None:
+    sinks: list[Sink] = [FakeSink("sqlite"), FakeSink("google_health", statuses={0: "failed"})]
+
+    result = await _agent(sinks=sinks).process(text="борщ")
+
+    assert result.status == "partial"
+    assert result.sinks_succeeded == ["sqlite"]
+    assert result.sinks_failed == ["google_health"]
+
+
+async def test_dry_run_skips_sinks_and_returns_token() -> None:
+    sqlite = FakeSink("sqlite")
+
+    result = await _agent(sinks=[sqlite]).process(text="борщ", dry_run=True)
+
+    assert result.status == "ok"
+    assert result.commit_token
+    assert sqlite.calls == []
+    assert result.sink_results == []
+
+
+async def test_debug_exposes_raw_response_on_success() -> None:
+    quiet = await _agent(debug=False).process(text="борщ")
+    loud = await _agent(debug=True).process(text="борщ")
+
+    assert quiet.raw_response is None
+    assert loud.raw_response == MEAL_JSON
+
+
+async def test_parse_failure_exposes_raw_response_without_debug() -> None:
+    llm = StubLLM(["не JSON", "тоже не JSON"])
+
+    result = await _agent(llm, sinks=[]).process(text="борщ")
+
+    assert result.status == "parse_failed"
+    assert result.raw_response == "тоже не JSON"
+    assert result.error
+    assert result.entry is None
+    assert result.sink_results == []
+
+
+async def test_llm_failure_is_error_and_skips_sinks() -> None:
+    llm = StubLLM([])
+    llm.fails = LLMError("boom")
+    sqlite = FakeSink("sqlite")
+
+    result = await _agent(llm, sinks=[sqlite]).process(text="борщ")
+
+    assert result.status == "error"
+    assert result.error == "boom"
+    assert sqlite.calls == []
+
+
+async def test_missing_input_is_invalid_without_llm_call() -> None:
+    llm = StubLLM([MEAL_JSON])
+
+    result = await _agent(llm).process()
+
+    assert result.status == "invalid_input"
+    assert result.error
+    assert llm.calls == []
+    assert result.entry is None
+
+
+async def test_unknown_image_format_is_invalid() -> None:
+    result = await _agent().process(image_bytes=b"definitely not an image")
+
+    assert result.status == "invalid_input"
+    assert result.error == "unsupported image format"
+
+
+async def test_non_meal_is_ignored_and_skips_sinks() -> None:
+    sqlite = FakeSink("sqlite")
+
+    result = await _agent(StubLLM([NOT_MEAL_JSON]), sinks=[sqlite]).process(text="спасибо")
+
+    assert result.status == "ignored"
+    assert sqlite.calls == []
+    assert result.raw_response is None
+
+
+async def test_audio_requires_transcriber() -> None:
+    result = await _agent().process(audio_bytes=b"ogg")
+
+    assert result.status == "invalid_input"
+    assert result.error == "audio input requires a transcriber"
+
+
+async def test_audio_is_transcribed_before_extraction() -> None:
+    transcriber = StubTranscriber("две котлеты")
+    sqlite = FakeSink("sqlite")
+
+    result = await _agent(transcriber=transcriber, sinks=[sqlite]).process(audio_bytes=b"ogg")
+
+    assert result.status == "ok"
+    assert result.transcript == "две котлеты"
+    assert transcriber.calls == [b"ogg"]
+    assert result.entry is not None
+    assert result.entry.source == "audio"
+    assert sqlite.calls[0].entry == result.entry
+
+
+async def test_empty_transcript_is_ignored() -> None:
+    transcriber = StubTranscriber("   ")
+    llm = StubLLM([MEAL_JSON])
+
+    result = await _agent(llm, transcriber=transcriber).process(audio_bytes=b"ogg")
+
+    assert result.status == "ignored"
+    assert result.transcript == "   "
+    assert llm.calls == []
+
+
+async def test_oversized_audio_is_rejected_before_transcription() -> None:
+    from nutrition_agent.routing import MAX_AUDIO_BYTES
+
+    transcriber = StubTranscriber("x")
+
+    result = await _agent(transcriber=transcriber).process(
+        audio_bytes=b"\x00" * (MAX_AUDIO_BYTES + 1)
+    )
+
+    assert result.status == "invalid_input"
+    assert transcriber.calls == []
+
+
+def test_duplicate_sink_names_rejected() -> None:
+    with pytest.raises(ValueError, match="duplicate sink name"):
+        _agent(sinks=[FakeSink("sqlite"), FakeSink("sqlite")])
+
+
+async def test_entry_written_once_per_sink() -> None:
+    sqlite = FakeSink("sqlite")
+
+    await _agent(sinks=[sqlite]).process(text="борщ")
+
+    assert len(sqlite.calls) == 1
+    entry = sqlite.calls[0].entry
+    assert isinstance(entry, NutritionEntry)
