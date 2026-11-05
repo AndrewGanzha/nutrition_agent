@@ -8,7 +8,7 @@ from typing import Any, cast
 
 import pytest
 
-from nutrition_agent.domain import MealType
+from nutrition_agent.domain import FoodItem, MealType
 from nutrition_agent.extraction import (
     EXTRACTION_SCHEMA,
     EXTRACTION_SCHEMA_NAME,
@@ -118,7 +118,7 @@ async def test_invalid_schema_payload_gets_one_repair() -> None:
     assert len(llm.calls) == 2
     repair_text = llm.calls[1][0][3].content
     assert isinstance(repair_text, str)
-    assert "name" in repair_text
+    assert "items.0.name" in repair_text
 
 
 async def test_failed_repair_returns_parse_failed_with_raw_response() -> None:
@@ -160,3 +160,4 @@ def test_schema_is_strict_for_every_object() -> None:
     assert item_schema["additionalProperties"] is False
     assert sorted(cast(list[str], item_schema["required"])) == sorted(item_schema["properties"])
     assert properties["meal_type"]["enum"] == [meal.value for meal in MealType]
+    assert sorted(item_schema["properties"]) == sorted(FoodItem.model_fields)

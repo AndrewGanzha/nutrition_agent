@@ -188,7 +188,10 @@ def _parse(raw: str) -> tuple[ExtractedMeal | None, str | None]:
     except json.JSONDecodeError as exc:
         return None, f"invalid JSON: {exc.msg} at position {exc.pos}"
     except ValidationError as exc:
-        details = json.dumps(exc.errors(include_url=False), ensure_ascii=False, default=str)
+        details = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc']) or 'payload'}: {error['msg']}"
+            for error in exc.errors(include_url=False)
+        )
         return None, details
 
 
